@@ -1,0 +1,355 @@
+<html>
+
+<head>
+	<title>CG2019_HW3_WangJunwei 3170105970</title>
+	<meta http-equiv="content-type" content="text/html">
+	<script type="text/javascript" src="glMatrix-0.9.5.min.js"></script>
+	<script type="text/javascript" src="webgl-utils.js"></script>
+	<meta charset="utf-8">
+
+	<script id="shader-fs" type="x-shader/x-fragment">
+    precision mediump float;
+
+    varying vec4 vColor;
+
+    void main(void) {
+        gl_FragColor = vColor;
+    }
+</script>
+
+	<script id="shader-vs" type="x-shader/x-vertex">
+    attribute vec3 aVertexPosition;
+    attribute vec4 aVertexColor;
+
+    uniform mat4 uMVMatrix;
+    uniform mat4 uPMatrix;
+
+    varying vec4 vColor;
+
+    void main(void) {
+        gl_Position = uPMatrix * uMVMatrix * vec4(aVertexPosition, 1.0);
+        vColor = aVertexColor;
+    }
+</script>
+
+
+	<script type="text/javascript">
+
+		// win is a lightweight wrapper of WebGL canvas functions
+		var win = {
+			createNew: function (canvasName) {
+				var win = {};
+
+				win.initGL = function (canvas) {
+					try {
+						win.gl = canvas.getContext("experimental-webgl");
+						win.gl.viewportWidth = canvas.width;
+						win.gl.viewportHeight = canvas.height;
+					} catch (e) {
+					}
+
+					if (!win.gl) {
+						alert("Could not initialise WebGL, sorry :-(");
+					}
+				};
+
+				win.getShader = function (gl, id) {
+					var shaderScript = document.getElementById(id);
+					if (!shaderScript) {
+						return null;
+					}
+
+					var str = "";
+					var k = shaderScript.firstChild;
+					while (k) {
+						if (k.nodeType == 3) {
+							str += k.textContent;
+						}
+						k = k.nextSibling;
+					}
+
+					var shader;
+					if (shaderScript.type == "x-shader/x-fragment") {
+						shader = gl.createShader(gl.FRAGMENT_SHADER);
+					} else if (shaderScript.type == "x-shader/x-vertex") {
+						shader = gl.createShader(gl.VERTEX_SHADER);
+					} else {
+						return null;
+					}
+
+					gl.shaderSource(shader, str);
+					gl.compileShader(shader);
+
+					if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+						alert(gl.getShaderInfoLog(shader));
+						return null;
+					}
+
+					return shader;
+				}
+
+				win.initShaders = function (gl) {
+					var shaderProgram;
+
+					var fragmentShader = win.getShader(gl, "shader-fs");
+					var vertexShader = win.getShader(gl, "shader-vs");
+
+					shaderProgram = gl.createProgram();
+					gl.attachShader(shaderProgram, vertexShader);
+					gl.attachShader(shaderProgram, fragmentShader);
+					gl.linkProgram(shaderProgram);
+
+					if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+						alert("Could not initialise shaders");
+					}
+
+					gl.useProgram(shaderProgram);
+
+					shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
+					gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+
+					shaderProgram.vertexColorAttribute = gl.getAttribLocation(shaderProgram, "aVertexColor");
+					gl.enableVertexAttribArray(shaderProgram.vertexColorAttribute);
+
+					shaderProgram.pMatrixUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
+					shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
+
+					return shaderProgram;
+				}
+
+				win.mvMatrix = mat4.create();
+				win.mvMatrixStack = [];
+				win.pMatrix = mat4.create();
+
+				win.mvPushMatrix = function () {
+					var copy = mat4.create();
+					mat4.set(win.mvMatrix, copy);
+					win.mvMatrixStack.push(copy);
+				};
+
+				win.mvPopMatrix = function () {
+					if (win.mvMatrixStack.length == 0) {
+						throw "Invalid popMatrix!";
+					}
+					win.mvMatrix = win.mvMatrixStack.pop();
+				};
+
+				win.setMatrixUniforms = function () {
+					var gl = win.gl;
+					var shaderProgram = win.shaderProgram;
+					gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, win.pMatrix);
+					gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, win.mvMatrix);
+				};
+
+				win.degToRad = function (degrees) {
+					return degrees * Math.PI / 180;
+				}
+
+				win.initBuffers = function (gl, shaderProgram) {
+					var triangleVertexPositionBuffer;
+					var triangleVertexColorBuffer;
+
+
+					triangleVertexPositionBuffer = gl.createBuffer();
+					gl.bindBuffer(gl.ARRAY_BUFFER, triangleVertexPositionBuffer);
+					var vertices = [
+						0.0, 2.0, 0.0,
+						-1.0, -1.0, 0.0,
+						1.0, -1.0, 0.0
+					];
+					gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+					triangleVertexPositionBuffer.itemSize = 3;
+					triangleVertexPositionBuffer.numItems = 3;
+
+					triangleVertexColorBuffer = gl.createBuffer();
+					gl.bindBuffer(gl.ARRAY_BUFFER, triangleVertexColorBuffer);
+					var colors = [
+						1.0, 0.0, 0.0, 1.0,
+						0.0, 1.0, 0.0, 1.0,
+						0.0, 0.0, 1.0, 1.0,
+					];
+					gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+					triangleVertexColorBuffer.itemSize = 4;
+					triangleVertexColorBuffer.numItems = 3;
+
+					win.triangleVertexPositionBuffer = triangleVertexPositionBuffer;
+					win.triangleVertexColorBuffer = triangleVertexColorBuffer;
+
+				};
+
+				win.rTri = 0;
+				// win.rSquare = 0;
+
+				win.setView = function () {
+					mat4.perspective(45, win.gl.viewportWidth / win.gl.viewportHeight, 0.1, 100.0, win.pMatrix);
+				};
+
+				win.drawScene = function () {
+					var gl = win.gl;
+					var shaderProgram = win.shaderProgram;
+
+					var triangleVertexPositionBuffer = win.triangleVertexPositionBuffer;
+					var triangleVertexColorBuffer = win.triangleVertexColorBuffer;
+	
+
+					gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+					gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+					win.setView();
+
+					mat4.identity(win.mvMatrix);
+					mat4.translate(win.mvMatrix, [0, 0.0, -7.0]);
+
+					win.mvPushMatrix();
+					mat4.rotate(win.mvMatrix, win.degToRad(win.rTri), [0, 1, 0]);
+
+					gl.bindBuffer(gl.ARRAY_BUFFER, triangleVertexPositionBuffer);
+					gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, triangleVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+					gl.bindBuffer(gl.ARRAY_BUFFER, triangleVertexColorBuffer);
+					gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, triangleVertexColorBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+					win.setMatrixUniforms();
+					gl.drawArrays(gl.TRIANGLES, 0, triangleVertexPositionBuffer.numItems);
+					win.mvPopMatrix();
+
+				}
+
+				win.canvas = document.getElementById(canvasName);
+				win.initGL(win.canvas);
+				win.shaderProgram = win.initShaders(win.gl);
+				win.initBuffers(win.gl, win.shaderProgram);
+
+				win.gl.clearColor(0.0, 0.0, 0.0, 1.0);
+				win.gl.enable(win.gl.DEPTH_TEST);
+
+				return win;
+			}
+		};
+
+		var win0, win1;
+		var win2, win3;
+
+		var lastTime = 0;
+		function animate() {
+			var timeNow = new Date().getTime();
+			if (lastTime != 0) {
+				var elapsed = timeNow - lastTime;
+
+				win0.rTri += (90 * elapsed) / 1000.0;
+
+				win1.rTri += (90 * elapsed) / 1000.0;
+
+				win2.rTri += (90 * elapsed) / 1000.0;
+
+				win3.rTri += (90 * elapsed) / 1000.0;
+			}
+			lastTime = timeNow;
+		}
+
+		function tick() {
+			requestAnimFrame(tick);
+			// drawScene();
+
+			win0.drawScene();
+			win1.drawScene();
+			win2.drawScene();
+			win3.drawScene();
+			animate();
+		}
+
+		var Rainbow = {
+			createNew: function () {
+				var rainbow = win.createNew();
+
+				/*
+				rainbow.setView = function (){
+					mat4.frustum(0, 50, 0, 50, 0.1, 100, rainbow.pMatrix);
+				};
+				*/
+
+				return rainbow;
+			}
+		};
+
+		function webGLStart() {
+
+			//*
+			win0 = win.createNew("win-canvas-0");
+			win1 = win.createNew("win-canvas-1");
+			win2 = win.createNew("win-canvas-2");
+			win3 = win.createNew("win-canvas-3");
+			//*/
+
+			win0.setView = function () {
+				// mat4.frustum(-50, 0, -50, 0, 0.1, 100, win1.pMatrix);
+				var fovy = 45.0;
+				var near = 0.1;
+				var far = 100.0;
+				var aspect = 1.0;
+				var top = near * Math.tan(fovy * Math.PI / 360.0);
+				var right = top * aspect;
+
+				mat4.frustum(-right, 0, 0, top, near, far, win0.pMatrix);
+			};
+
+			win1.setView = function () {
+				// mat4.frustum(-50, 0, -50, 0, 0.1, 100, win1.pMatrix);
+				var fovy = 45.0;
+				var near = 0.1;
+				var far = 100.0;
+				var aspect = 1.0;
+				var top = near * Math.tan(fovy * Math.PI / 360.0);
+				var right = top * aspect;
+
+				mat4.frustum(0, right, 0, top, near, far, win1.pMatrix);
+			};
+
+			win2.setView = function () {
+				// mat4.frustum(-50, 0, -50, 0, 0.1, 100, win1.pMatrix);
+				var fovy = 45.0;
+				var near = 0.1;
+				var far = 100.0;
+				var aspect = 1.0;
+				var top = near * Math.tan(fovy * Math.PI / 360.0);
+				var right = top * aspect;
+
+				mat4.frustum(-right, 0, -top, 0, near, far, win2.pMatrix);
+			};
+
+			win3.setView = function () {
+				// mat4.frustum(-50, 0, -50, 0, 0.1, 100, win1.pMatrix);
+				var fovy = 45.0;
+				var near = 0.1;
+				var far = 100.0;
+				var aspect = 1.0;
+				var top = near * Math.tan(fovy * Math.PI / 360.0);
+				var right = top * aspect;
+
+				mat4.frustum(0, right, -top, 0, near, far, win3.pMatrix);
+			};
+
+			tick();
+		}
+
+	</script>
+
+</head>
+
+<font size="10" color="blue">汪俊威 3170105970</font>
+
+<body onload="webGLStart();">
+
+	<div align="center">
+		<br />
+		<canvas id="win-canvas-0" style="border: none;" width="600" height="300"></canvas>
+		<canvas id="win-canvas-1" style="border: none;" width="600" height="300"></canvas>
+		<br />
+		<canvas id="win-canvas-2" style="border: none;" width="600" height="300"></canvas>
+		<canvas id="win-canvas-3" style="border: none;" width="600" height="300"></canvas>
+		<br />
+	</div>
+
+</body>
+
+</html>
